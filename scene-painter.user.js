@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         🎨 Crack Scene Painter (크랙 장면 삽화)
 // @namespace    crack-scene-painter
-// @version      5.6.0.4
-// @description  크랙 AI 삽화 + 만화 콘티. 5.6.0.4: 모바일 화면 지원 + 터치 편의 + 갤러리 보관 범위(이 채팅/같은 작품/전체).
+// @version      5.6.0.5
+// @description  크랙 AI 삽화 + 만화 콘티. 5.6.0.5: 모바일 화면 지원 + 터치 편의 + 갤러리 보관 범위(이 채팅/같은 작품/전체).
 // @match        https://crack.wrtn.ai/*
 // @grant        GM_xmlhttpRequest
 // @grant        GM_getValue
@@ -18,6 +18,7 @@
 // @require      https://cdn.jsdelivr.net/npm/fflate@0.8.2/umd/index.js
 // @run-at       document-idle
 // ==/UserScript==
+// 5.6.0.5: 폰 브라우저가 사진 저장소(IndexedDB)를 막으면 탬퍼몽키 저장소에 대신 저장(새로고침하면 사진이 사라지던 문제).
 // 5.6.0.4: 원본과 같이 켜져 있으면 멈추고 안내(기록 덮어쓰기 방지), 갤러리에 저장 상태 한 줄 표시.
 // 5.6.0.3: 파이어폭스에서 저장 목록을 못 읽던 문제 수정(기록 개수 0으로 뜨던 것).
 // 5.6.0.2: 채팅 삽화 버튼 작게, 갤러리에 이 채팅/같은 작품/전체 보기, 메시지 번호가 바뀌어도 글 내용으로 저장된 삽화를 다시 찾아 붙임.
@@ -3472,7 +3473,7 @@ director.lightingIntent:
         return imageDbPromise;
     }
 
-    async function putStoredImage(id, dataUrl) {
+    async function cspPutStoredImageIdb(id, dataUrl) {
         if (!id || !dataUrl) return;
         const db = await openImageDb();
         return new Promise((resolve, reject) => {
@@ -3483,7 +3484,7 @@ director.lightingIntent:
         });
     }
 
-    async function getStoredImage(id) {
+    async function cspGetStoredImageIdb(id) {
         if (!id) return '';
         const db = await openImageDb();
         return new Promise((resolve, reject) => {
@@ -3494,7 +3495,7 @@ director.lightingIntent:
         });
     }
 
-    async function deleteStoredImage(id) {
+    async function cspDeleteStoredImageIdb(id) {
         if (!id) return;
         deleteStoredThumbnail(id).catch(() => {});
         const db = await openImageDb();
@@ -11075,10 +11076,37 @@ ${P} .gallery-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
             try{
                 const db=await openImageDb();
                 const n=await new Promise((res,rej)=>{const tx=db.transaction(IMAGE_STORE_NAME,'readonly');const rq=tx.objectStore(IMAGE_STORE_NAME).count();rq.onsuccess=()=>res(rq.result);rq.onerror=()=>rej(rq.error)});
-                idb=`${n}장`;
+                idb=`${n}장`+(cspIdbBroken?` (저장 실패: ${cspIdbBroken} → 대체 저장소 사용)`:'');
             }catch(e){idb='오류('+String(e?.name||e?.message||e).slice(0,40)+')'}
             if(line.isConnected)line.textContent=line.textContent.replace('사진 저장소 확인 중',`사진 저장소 ${idb}`);
         }catch(e){console.warn('[Scene Painter 진단]',e)}
+    }
+
+    /* 5.6.0.5 사진 저장소 대체: 파이어폭스 등에서 IndexedDB 저장이 막히면 탬퍼몽키 저장소(GM_setValue)에 넣는다. */
+    let cspIdbBroken=null,cspIdbWarned=false;
+    const cspGmImageKey=id=>`${CSP_PREFIX}_img_${id}`;
+    function cspNoteIdbFailure(err){
+        cspIdbBroken=String(err?.name||err?.message||err||'오류').slice(0,60);
+        console.warn('[Scene Painter] IndexedDB 사용 불가, 탬퍼몽키 저장소로 대신 저장:',err);
+        if(!cspIdbWarned){cspIdbWarned=true;try{showToast('📦 이 브라우저는 사진 저장소를 막아서, 탬퍼몽키 저장소에 대신 보관해요.')}catch(_){}}
+    }
+    async function putStoredImage(id,dataUrl){
+        if(!id||!dataUrl)return;
+        try{await cspPutStoredImageIdb(id,dataUrl);return}
+        catch(err){cspNoteIdbFailure(err)}
+        GM_setValue(cspGmImageKey(id),dataUrl);
+    }
+    async function getStoredImage(id){
+        if(!id)return '';
+        let v='';
+        try{v=await cspGetStoredImageIdb(id)}catch(err){cspNoteIdbFailure(err)}
+        if(v)return v;
+        try{return GM_getValue(cspGmImageKey(id),'')||''}catch(_){return ''}
+    }
+    async function deleteStoredImage(id){
+        if(!id)return;
+        try{GM_deleteValue(cspGmImageKey(id))}catch(_){}
+        try{return await cspDeleteStoredImageIdb(id)}catch(err){cspNoteIdbFailure(err)}
     }
 
     function ensureV35Styles() {
