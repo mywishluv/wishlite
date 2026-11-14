@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         🎨 Crack Scene Painter (크랙 장면 삽화)
 // @namespace    crack-scene-painter
-// @version      5.6.0.3
-// @description  크랙 AI 삽화 + 만화 콘티. 5.6.0.3: 모바일 화면 지원 + 터치 편의 + 갤러리 보관 범위(이 채팅/같은 작품/전체).
+// @version      5.6.0.4
+// @description  크랙 AI 삽화 + 만화 콘티. 5.6.0.4: 모바일 화면 지원 + 터치 편의 + 갤러리 보관 범위(이 채팅/같은 작품/전체).
 // @match        https://crack.wrtn.ai/*
 // @grant        GM_xmlhttpRequest
 // @grant        GM_getValue
@@ -18,6 +18,7 @@
 // @require      https://cdn.jsdelivr.net/npm/fflate@0.8.2/umd/index.js
 // @run-at       document-idle
 // ==/UserScript==
+// 5.6.0.4: 원본과 같이 켜져 있으면 멈추고 안내(기록 덮어쓰기 방지), 갤러리에 저장 상태 한 줄 표시.
 // 5.6.0.3: 파이어폭스에서 저장 목록을 못 읽던 문제 수정(기록 개수 0으로 뜨던 것).
 // 5.6.0.2: 채팅 삽화 버튼 작게, 갤러리에 이 채팅/같은 작품/전체 보기, 메시지 번호가 바뀌어도 글 내용으로 저장된 삽화를 다시 찾아 붙임.
 // 5.6.0.1 (모바일판): 좁은 화면에서도 스튜디오·설정·갤러리 사용 가능, 뷰어 핀치 확대·두 번 탭·아래로 밀어 닫기, 채팅 삽화 버튼 항상 표시·좌우로 밀어 기록 넘기기, 입력할 때 화면 확대 방지.
@@ -10899,6 +10900,24 @@ ${P} .gallery-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
             if(btn&&!btn.disabled)btn.click();
         },{passive:true,capture:true});
     }
+    // 같은 페이지에 Scene Painter가 이미 돌고 있으면(원본과 모바일판을 같이 켠 경우) 서로 기록을 덮어써서 사진이 사라진다.
+    // 그럴 땐 이 스크립트는 멈추고 안내만 띄운다.
+    function cspDuplicateGuard(){
+        const de=document.documentElement;
+        const other=de.getAttribute('data-csp-running')||(document.getElementById('csp-scene-painter-style')||document.getElementById('csp-scene-painter-row')?'원본':'');
+        if(!other){de.setAttribute('data-csp-running','모바일판');return false}
+        const show=()=>{
+            if(document.getElementById('csp-dup-warn'))return;
+            const d=document.createElement('div');d.id='csp-dup-warn';
+            d.style.cssText='position:fixed;left:12px;right:12px;top:calc(12px + env(safe-area-inset-top));z-index:2147483647;padding:14px 16px;border-radius:14px;background:#2a1414;border:1px solid #ff8a8a;color:#fff;font:600 14px/1.5 system-ui,sans-serif;box-shadow:0 10px 30px rgba(0,0,0,.4)';
+            d.innerHTML='⚠️ Scene Painter가 두 개 켜져 있어요.<br><span style="font-weight:400;font-size:13px">둘이 서로 기록을 덮어써서 사진이 사라져요. 탬퍼몽키 대시보드에서 원본(5.6.0)을 꺼주세요.</span><button style="display:block;margin-top:10px;width:100%;height:40px;border:0;border-radius:10px;background:#ff8a8a;color:#2a1414;font-weight:700">확인</button>';
+            d.querySelector('button').onclick=()=>d.remove();
+            (document.body||de).appendChild(d);
+        };
+        if(document.body)show();else document.addEventListener('DOMContentLoaded',show,{once:true});
+        return true;
+    }
+    if(cspDuplicateGuard())throw new Error('[Scene Painter 모바일판] 다른 Scene Painter가 이미 실행 중이라 멈췄어요.');
     cspInstallMobileHelpers();
 
     /* ============================================================
@@ -10999,6 +11018,7 @@ ${P} .gallery-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
                 box.addEventListener('click',e=>{const b=e.target.closest('[data-g-scope]');if(!b)return;patchV35Ui('gallery',{scope:b.dataset.gScope});openV35Gallery()});
                 bar.insertBefore(box,bar.firstChild);
             }
+            cspGalleryDiagnose(root);
         }catch(_){}
         return result;
     }
@@ -11037,6 +11057,28 @@ ${P} .gallery-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
     function openV35Viewer(opts={}){
         if(opts?.item?.foreign)opts={...opts,item:null};
         return cspOpenV35ViewerBase(opts);
+    }
+
+    // 갤러리 아래에 저장 상태를 한 줄로 보여준다(사진이 사라질 때 원인 찾기용).
+    async function cspGalleryDiagnose(root){
+        try{
+            const body=root?.querySelector('.gallery-body');if(!body)return;
+            let line=body.querySelector('.g-diag');
+            if(!line){line=document.createElement('div');line.className='help g-diag';line.style.cssText='margin:-4px 0 10px;font-size:11px;line-height:1.5;opacity:.8';body.querySelector('.gallery-toolbar')?.after(line)}
+            const keys=cspLsKeys(),recKeys=keys.filter(k=>k.startsWith(`${CSP_PREFIX}_scene_records_`));
+            const roomKey=getSceneRecordsKey(getRoomId()),raw=localStorage.getItem(roomKey);
+            let roomCount='없음';
+            if(raw){try{roomCount=Object.keys(getLocalJsonStorage(roomKey,{})||{}).length+'개'}catch(_){roomCount='못 읽음'}}
+            const memCount=Object.keys(getSceneRecords()||{}).length;
+            let idb='확인 중';
+            line.textContent=`저장 상태 · 기록 방 ${recKeys.length}개 · 이 방 저장 ${roomCount} · 이 방 화면 ${memCount}개 · 사진 저장소 ${idb} · 압축도구 ${window.fflate?.gzipSync?'있음':'없음'} · 방 ${String(getRoomId()).slice(-6)}`;
+            try{
+                const db=await openImageDb();
+                const n=await new Promise((res,rej)=>{const tx=db.transaction(IMAGE_STORE_NAME,'readonly');const rq=tx.objectStore(IMAGE_STORE_NAME).count();rq.onsuccess=()=>res(rq.result);rq.onerror=()=>rej(rq.error)});
+                idb=`${n}장`;
+            }catch(e){idb='오류('+String(e?.name||e?.message||e).slice(0,40)+')'}
+            if(line.isConnected)line.textContent=line.textContent.replace('사진 저장소 확인 중',`사진 저장소 ${idb}`);
+        }catch(e){console.warn('[Scene Painter 진단]',e)}
     }
 
     function ensureV35Styles() {
