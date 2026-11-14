@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         🎨 Crack Scene Painter (크랙 장면 삽화)
 // @namespace    crack-scene-painter
-// @version      5.6.0.1
-// @description  크랙 AI 삽화 + 만화 콘티. 5.6.0.1: 모바일 화면 지원(스튜디오·설정·갤러리·뷰어) + 터치 편의 기능.
+// @version      5.6.0.3
+// @description  크랙 AI 삽화 + 만화 콘티. 5.6.0.3: 모바일 화면 지원 + 터치 편의 + 갤러리 보관 범위(이 채팅/같은 작품/전체).
 // @match        https://crack.wrtn.ai/*
 // @grant        GM_xmlhttpRequest
 // @grant        GM_getValue
@@ -18,6 +18,8 @@
 // @require      https://cdn.jsdelivr.net/npm/fflate@0.8.2/umd/index.js
 // @run-at       document-idle
 // ==/UserScript==
+// 5.6.0.3: 파이어폭스에서 저장 목록을 못 읽던 문제 수정(기록 개수 0으로 뜨던 것).
+// 5.6.0.2: 채팅 삽화 버튼 작게, 갤러리에 이 채팅/같은 작품/전체 보기, 메시지 번호가 바뀌어도 글 내용으로 저장된 삽화를 다시 찾아 붙임.
 // 5.6.0.1 (모바일판): 좁은 화면에서도 스튜디오·설정·갤러리 사용 가능, 뷰어 핀치 확대·두 번 탭·아래로 밀어 닫기, 채팅 삽화 버튼 항상 표시·좌우로 밀어 기록 넘기기, 입력할 때 화면 확대 방지.
 // 원본: chyoyam-alt/userscripts-shared (CSP.user.js 5.6.0). 원본 자동 업데이트에 덮어써지지 않도록 업데이트 주소는 뺐어요.
 
@@ -1229,7 +1231,7 @@
     }
 
     function getLocalStorageRows(filter = '') {
-        return Object.keys(localStorage)
+        return cspLsKeys()
             .filter(key => !filter || key.includes(filter))
             .map(key => {
                 const value = localStorage.getItem(key) || '';
@@ -1254,7 +1256,7 @@
     }
 
     function migrateLocalJsonStorageToCompressed() {
-        const keys = Object.keys(localStorage).filter(key =>
+        const keys = cspLsKeys().filter(key =>
             key === GLOBAL_SETTINGS_KEY ||
             key.startsWith(`${CSP_PREFIX}_room_settings_`) ||
             key.startsWith(`${CSP_PREFIX}_scene_records_`)
@@ -2992,7 +2994,7 @@ director.lightingIntent:
         return null;
     }
 
-    function saveSceneRecords(records, options = {}) {
+    function cspSaveSceneRecordsBase(records, options = {}) {
         const roomId = options.roomId || cspSceneRecordOwners.get(records) || getRoomId();
         const compact = stripLargeImageFields(records || {}, { ...options, roomId });
         cspSceneRecordOwners.set(compact, roomId);
@@ -3565,7 +3567,7 @@ director.lightingIntent:
 
     function collectLiveStoredImageIds() {
         const liveIds = new Set();
-        Object.keys(localStorage).forEach(storageKey => {
+        cspLsKeys().forEach(storageKey => {
             if (storageKey.startsWith(`${CSP_PREFIX}_scene_records_`)) {
                 const records = getLocalJsonStorage(storageKey, {});
                 Object.values(records || {}).forEach(record => {
@@ -5054,7 +5056,7 @@ director.lightingIntent:
     }
 
     async function migrateSceneImagesToIndexedDb() {
-        const keys = Object.keys(localStorage).filter(key => key.startsWith(`${CSP_PREFIX}_scene_records_`));
+        const keys = cspLsKeys().filter(key => key.startsWith(`${CSP_PREFIX}_scene_records_`));
         for (const storageKey of keys) {
             const records = getLocalJsonStorage(storageKey, {});
             const roomPart = storageKey.replace(`${CSP_PREFIX}_scene_records_`, '') || getRoomId();
@@ -5378,7 +5380,7 @@ director.lightingIntent:
         return `text_${hashText(text.slice(0, 4000))}`;
     }
 
-    function migrateLegacyMessageRecord(records, markdown, checkLegacy = true) {
+    function cspMigrateLegacyMessageRecordBase(records, markdown, checkLegacy = true) {
         const key = getMessageKey(markdown);
         if (!records || records[key]) return { key, record: records?.[key] || null, migrated: false };
         if (!checkLegacy) return { key, record: null, migrated: false };
@@ -10614,6 +10616,8 @@ ${JSON.stringify(safePlan, null, 2)}
      * - PC 전용 화면을 좁은 화면에서도 쓸 수 있게 CSS로 다시 배치한다.
      * - 원래 기능 코드는 건드리지 않고, 화면 배치·터치 동작만 덧붙인다.
      * ============================================================ */
+    // 파이어폭스(탬퍼몽키)에서는 Object.keys(localStorage)가 빈 목록을 줄 수 있어서 하나씩 꺼내 읽는다.
+    function cspLsKeys(){const out=[];try{for(let i=0;i<localStorage.length;i++){const k=localStorage.key(i);if(k!=null)out.push(k)}}catch(_){}return out}
     function cspIsMobileUi(){try{return window.matchMedia(CSP_MOBILE_MQ).matches}catch(_){return false}}
     function cspIsTouchUi(){try{return window.matchMedia('(hover:none) and (pointer:coarse)').matches}catch(_){return false}}
 
@@ -10639,16 +10643,20 @@ ${JSON.stringify(safePlan, null, 2)}
     }
 
     const CSP_MOBILE_CSS = (()=>{const P='html body #csp-v35-root';return `
+/* 갤러리 보관 범위 버튼 */
+#csp-v35-root .g-scope{display:inline-flex;gap:2px;padding:2px;border:1px solid var(--line);border-radius:10px;background:var(--sf2,var(--sf))}
+#csp-v35-root .g-scope button{flex:1;height:30px;padding:0 10px;border:0;border-radius:8px;background:transparent;color:var(--tx2,var(--tx));font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap}
+#csp-v35-root .g-scope button.on{background:var(--soft,rgba(167,139,250,.18));color:var(--ac,var(--tx))}
+#csp-v35-root .groom{font-size:10.5px;color:var(--tx3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:1px}
 /* PC에서는 모바일용 묶음 상자가 없는 것처럼 보이게 */
 #csp-v35-root .bottom .m-sub,#csp-v35-root .bottom .m-pri{display:contents}
 
 /* 채팅 속 삽화: 터치 화면에서는 버튼을 항상 보이고 크게 */
 @media (hover:none) and (pointer:coarse){
-.csp-generated-scene-image .csp-image-info-row,.csp-generated-scene-image .csp-image-action-row{opacity:1!important;pointer-events:auto!important}
-.csp-image-action-btn{width:34px!important;height:34px!important;font-size:15px!important}
-.csp-image-action-row{gap:6px!important;right:10px!important;bottom:10px!important}
-.csp-image-info-row{left:10px!important;top:10px!important}
-.csp-image-history-btn{min-width:36px;min-height:32px}
+.csp-generated-scene-image .csp-image-info-row,.csp-generated-scene-image .csp-image-action-row{opacity:.85!important;pointer-events:auto!important}
+.csp-image-action-btn{width:24px!important;height:24px!important;font-size:11px!important;border-width:0!important;box-shadow:none!important}
+.csp-image-action-row{gap:4px!important;right:8px!important;bottom:8px!important}
+.csp-image-info-row{left:8px!important;top:8px!important}
 ${P}{touch-action:manipulation}
 ${P} .btn{min-height:38px}
 ${P} .btn.tiny{min-height:32px}
@@ -10737,6 +10745,7 @@ ${P} .gallery-toolbar{flex-wrap:wrap;gap:8px}
 ${P} #v35-g-search{width:100%!important;flex:1 1 100%}
 ${P} #v35-g-sort{width:auto!important}
 ${P} .gallery-grid{grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px}
+${P} .g-scope{order:-1;flex:1 1 100%}
 
 /* 크게 보기 */
 ${P} .viewer{padding:0}
@@ -10891,6 +10900,144 @@ ${P} .gallery-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
         },{passive:true,capture:true});
     }
     cspInstallMobileHelpers();
+
+    /* ============================================================
+     * 5.6.0.2 보관 기능
+     * - 채팅방마다 이름·작품 번호를 적어둬서, 갤러리에서 '같은 작품'·'전체' 사진을 볼 수 있게 한다.
+     * - 메시지 번호가 바뀌어도 글 내용이 같으면 저장된 삽화를 다시 찾아 붙인다.
+     * ============================================================ */
+    function cspRoomMetaKey(roomId){return `${CSP_PREFIX}_room_meta_${roomId}`}
+    function cspGetRoomMeta(roomId){try{return safeJsonParse(localStorage.getItem(cspRoomMetaKey(roomId)),{})||{}}catch(_){return {}}}
+    function cspCurrentRoomTitle(){
+        let t=String(document.title||'').trim();
+        t=t.replace(/\s*[|\-–—·:]\s*(크랙|crack|wrtn|뤼튼)[^|]*$/i,'').replace(/^(크랙|crack|wrtn|뤼튼)\s*[|\-–—·:]\s*/i,'').trim();
+        if(!t||/^(크랙|crack|wrtn|뤼튼)$/i.test(t))return '';
+        return t.slice(0,60);
+    }
+    function cspTouchRoomMeta(roomId=getRoomId()){
+        try{
+            if(!roomId||roomId!==getRoomId())return;
+            const old=cspGetRoomMeta(roomId);
+            const story=location.pathname.match(/\/stories\/([^/?#]+)/);
+            const next={roomId,storyId:story?.[1]||old.storyId||'',title:cspCurrentRoomTitle()||old.title||'',path:location.pathname+location.search};
+            const same=old.storyId===next.storyId&&old.title===next.title&&old.path===next.path;
+            if(same&&Date.now()-Number(old.updatedAt||0)<3600000)return;
+            localStorage.setItem(cspRoomMetaKey(roomId),JSON.stringify({...next,updatedAt:Date.now()}));
+        }catch(_){}
+    }
+    function saveSceneRecords(records,options={}){
+        const result=cspSaveSceneRecordsBase(records,options);
+        try{const roomId=options.roomId||cspSceneRecordOwners.get(records)||getRoomId();if(roomId===getRoomId())cspTouchRoomMeta(roomId)}catch(_){}
+        return result;
+    }
+
+    // 글 내용으로 만든 보조 열쇠(메시지 번호가 바뀌었을 때 대신 찾는 용도)
+    const cspTextKeyCache=new WeakMap();
+    function cspTextKeyOf(markdown){
+        if(!markdown)return '';
+        const len=(markdown.textContent||'').length;
+        const c=cspTextKeyCache.get(markdown);
+        if(c&&c.len===len)return c.key;
+        const text=cleanMarkdownText(markdown);
+        const key=text.length>=20?`text_${hashText(text.slice(0,4000))}`:'';
+        cspTextKeyCache.set(markdown,{len,key});
+        return key;
+    }
+    function migrateLegacyMessageRecord(records,markdown,checkLegacy=true){
+        const r=cspMigrateLegacyMessageRecordBase(records,markdown,checkLegacy);
+        try{
+            if(!records||!markdown)return r;
+            if(r.record){
+                if(!r.record.textKey){const tk=cspTextKeyOf(markdown);if(tk){r.record.textKey=tk;return {...r,migrated:true}}}
+                return r;
+            }
+            const tk=cspTextKeyOf(markdown);if(!tk)return r;
+            let found=records[tk]&&tk!==r.key?tk:'';
+            if(!found){for(const[k,rec]of Object.entries(records)){if(k!==r.key&&rec&&rec.textKey===tk){found=k;break}}}
+            if(!found)return r;
+            // 원래 메시지가 지금 화면에 따로 떠 있으면 옮기지 않는다.
+            if(document.querySelector(`.csp-generated-scene-image[data-message-key="${CSS.escape(found)}"]`))return r;
+            records[r.key]=records[found];delete records[found];
+            if(!records[r.key].textKey)records[r.key].textKey=tk;
+            return {key:r.key,record:records[r.key],migrated:true};
+        }catch(e){console.warn('[Scene Painter 보관]',e);return r}
+    }
+
+    // 갤러리: 이 채팅 / 같은 작품 / 전체
+    function cspGalleryScope(){const s=getV35UiState().gallery?.scope;return s==='story'||s==='all'?s:'room'}
+    function v35GalleryItems(){
+        const cur=getRoomId();
+        const out=cspV35GalleryItemsBase().map(x=>({...x,roomId:cur}));
+        const scope=cspGalleryScope();
+        if(scope==='room')return out;
+        try{
+            cspTouchRoomMeta(cur);
+            const curMeta=cspGetRoomMeta(cur),prefix=`${CSP_PREFIX}_scene_records_`,defaultModel=getGlobalSettings().naiModel;
+            cspLsKeys().filter(k=>k.startsWith(prefix)).forEach(k=>{
+                const rid=k.slice(prefix.length);if(!rid||rid===cur)return;
+                const meta=cspGetRoomMeta(rid);
+                if(scope==='story'){
+                    const same=(curMeta.storyId&&meta.storyId===curMeta.storyId)||(curMeta.title&&meta.title===curMeta.title);
+                    if(!same)return;
+                }
+                let recs={};try{recs=getLocalJsonStorage(k,{})||{}}catch(_){return}
+                Object.entries(recs).forEach(([mk,raw])=>{
+                    const rec=normalizeSceneRecordHistory(raw,mk),h=rec?.history||[];
+                    h.forEach((x,i)=>out.push({messageKey:mk,record:rec,index:i,createdAt:Number(x?.createdAt||rec?.createdAt||0),title:rec?.plan?.sceneTitle||'장면 삽화',model:rec?.naiSettings?.model||defaultModel,chars:'',roomId:rid,roomTitle:meta.title||'',roomPath:meta.path||'',foreign:true}));
+                });
+            });
+        }catch(e){console.warn('[Scene Painter 갤러리]',e)}
+        return out.sort((a,b)=>b.createdAt-a.createdAt);
+    }
+    function openV35Gallery(){
+        const result=cspOpenV35GalleryBase();
+        try{
+            const root=cspV35Root,bar=root?.querySelector('.gallery-toolbar');
+            if(bar&&!bar.querySelector('.g-scope')){
+                const scope=cspGalleryScope(),box=document.createElement('div');box.className='g-scope';
+                box.innerHTML=[['room','이 채팅'],['story','같은 작품'],['all','전체']].map(([v,l])=>`<button type="button" data-g-scope="${v}" class="${scope===v?'on':''}">${l}</button>`).join('');
+                box.addEventListener('click',e=>{const b=e.target.closest('[data-g-scope]');if(!b)return;patchV35Ui('gallery',{scope:b.dataset.gScope});openV35Gallery()});
+                bar.insertBefore(box,bar.firstChild);
+            }
+        }catch(_){}
+        return result;
+    }
+    async function renderV35Gallery(root){
+        const result=await cspRenderV35GalleryBase(root);
+        try{
+            const items=root?.__v35Items||[];
+            root?.querySelectorAll('#v35-g-grid>article').forEach((art,i)=>{
+                const x=items[i];if(!x?.foreign||art.querySelector('.groom'))return;
+                const d=document.createElement('div');d.className='groom';d.textContent='💬 '+(x.roomTitle||`다른 채팅 ${String(x.roomId).slice(-6)}`);
+                art.querySelector('.gtitle')?.after(d);
+            });
+        }catch(_){}
+        return result;
+    }
+    function openV35GalleryMenu(anchor,item){
+        if(!item?.foreign)return cspOpenV35GalleryMenuBase(anchor,item);
+        cspV35Root?.querySelector('.v35-menu')?.__v35Cleanup?.();cspV35Root?.querySelector('.v35-menu')?.remove();
+        const menu=document.createElement('div');menu.className='v35-menu';
+        const r=anchor.getBoundingClientRect();
+        menu.style.cssText=`position:fixed;z-index:2147483600;left:${Math.max(8,Math.min(innerWidth-220,r.right-210))}px;top:${Math.max(8,Math.min(innerHeight-140,r.bottom+4))}px;width:210px;padding:4px;border:1px solid var(--line);border-radius:12px;background:var(--sf);box-shadow:var(--shadow)`;
+        menu.innerHTML=`<button class="btn ghost" data-a="download" style="width:100%;justify-content:flex-start">⬇ 다운로드</button>${item.roomPath?'<button class="btn ghost" data-a="go" style="width:100%;justify-content:flex-start">💬 그 채팅으로 이동</button>':''}`;
+        cspV35Root.appendChild(menu);
+        const onOutside=e=>{if(!menu.contains(e.target)&&!anchor.contains(e.target))cleanup()};
+        const cleanup=()=>{document.removeEventListener('mousedown',onOutside,true);menu.remove()};
+        menu.__v35Cleanup=cleanup;
+        setTimeout(()=>document.addEventListener('mousedown',onOutside,true),0);
+        menu.addEventListener('click',async e=>{
+            const a=e.target.closest('[data-a]')?.dataset.a;if(!a)return;cleanup();
+            try{
+                if(a==='download'){v35다운로드(await getRecordImageSrc(item.record,item.index),item.title);return}
+                if(a==='go'){closeV35();location.href=item.roomPath}
+            }catch(err){v35Toast('실패: '+err.message,'error',0)}
+        });
+    }
+    function openV35Viewer(opts={}){
+        if(opts?.item?.foreign)opts={...opts,item:null};
+        return cspOpenV35ViewerBase(opts);
+    }
 
     function ensureV35Styles() {
         if (document.getElementById('csp-v35-style')) return;
@@ -11573,7 +11720,7 @@ ${v35GaugeHtml({thin:true,percent:b.charCount/b.maxCharacters*100,tone:'ok'})}</
         try { await deleteStoredMeta(CSP_THUMB_META_PREFIX + id); } catch (_) {}
     }
 
-    function v35GalleryItems(){
+    function cspV35GalleryItemsBase(){
         const out=[],defaultModel=getGlobalSettings().naiModel;Object.entries(getSceneRecords()||{}).forEach(([messageKey,raw])=>{const rec=normalizeSceneRecordHistory(raw,messageKey),h=rec?.history||[];h.forEach((x,i)=>out.push({messageKey,record:rec,index:i,createdAt:Number(x?.createdAt||rec?.createdAt||0),title:rec?.plan?.sceneTitle||'장면 삽화',model:rec?.naiSettings?.model||defaultModel,chars:(rec?.plan?.visibleCharacters||rec?.plan?.charactersInScene||rec?.plan?.characters||[]).map?.(v=>typeof v==='string'?v:(v?.name||v?.characterId||'')).join(' ')||''}))});return out.sort((a,b)=>b.createdAt-a.createdAt)
     }
     async function renderV35Film(root){
@@ -11966,8 +12113,8 @@ ${selected && !ui.mode ? `<div class="pp-preview">${escapeHtml(selected.prompt |
         }
     }
 
-    function openV35Gallery(){const{root,app}=mountV35('gallery');root.dataset.view='gallery';const ui=getV35UiState().gallery;app.innerHTML=`<div class="v35-top">${cspV35Session?'<button class="btn ghost" id="v35-g-back">← Studio</button>':''}<div class="v35-brand">🖼 Gallery</div><div class="grow"></div><button class="btn ghost" id="v35-g-settings">⚙ 설정</button><button class="iconbtn" id="v35-g-close">×</button></div><div class="gallery-body"><div class="gallery-toolbar"><input class="input" id="v35-g-search" style="width:280px" placeholder="장면 제목 / 캐릭터 / message id 검색" value="${escapeHtml(ui.query||'')}"><select class="select" id="v35-g-sort" style="width:130px"><option value="newest" ${ui.sort==='newest'?'selected':''}>최신순</option><option value="oldest" ${ui.sort==='oldest'?'selected':''}>오래된순</option></select><div class="grow"></div><span class="help" id="v35-g-count"></span></div><div class="gallery-grid" id="v35-g-grid"></div></div>`;root.querySelector('#v35-g-close')?.addEventListener('click',()=>{closeV35();cspV35Session=null});root.querySelector('#v35-g-back')?.addEventListener('click',()=>renderV35Studio());root.querySelector('#v35-g-settings')?.addEventListener('click',()=>openV35Settings('storage'));{const searchInput=root.querySelector('#v35-g-search');let lastQuery=String(searchInput?.value??'');searchInput?.addEventListener('input',e=>{const v=String(e.target.value);if(v===lastQuery)return;lastQuery=v;patchV35Ui('gallery',{query:e.target.value});renderV35Gallery(root)})}root.querySelector('#v35-g-sort')?.addEventListener('change',e=>{patchV35Ui('gallery',{sort:e.target.value});renderV35Gallery(root)});renderV35Gallery(root)}
-    async function renderV35Gallery(root){
+    function cspOpenV35GalleryBase(){const{root,app}=mountV35('gallery');root.dataset.view='gallery';const ui=getV35UiState().gallery;app.innerHTML=`<div class="v35-top">${cspV35Session?'<button class="btn ghost" id="v35-g-back">← Studio</button>':''}<div class="v35-brand">🖼 Gallery</div><div class="grow"></div><button class="btn ghost" id="v35-g-settings">⚙ 설정</button><button class="iconbtn" id="v35-g-close">×</button></div><div class="gallery-body"><div class="gallery-toolbar"><input class="input" id="v35-g-search" style="width:280px" placeholder="장면 제목 / 캐릭터 / message id 검색" value="${escapeHtml(ui.query||'')}"><select class="select" id="v35-g-sort" style="width:130px"><option value="newest" ${ui.sort==='newest'?'selected':''}>최신순</option><option value="oldest" ${ui.sort==='oldest'?'selected':''}>오래된순</option></select><div class="grow"></div><span class="help" id="v35-g-count"></span></div><div class="gallery-grid" id="v35-g-grid"></div></div>`;root.querySelector('#v35-g-close')?.addEventListener('click',()=>{closeV35();cspV35Session=null});root.querySelector('#v35-g-back')?.addEventListener('click',()=>renderV35Studio());root.querySelector('#v35-g-settings')?.addEventListener('click',()=>openV35Settings('storage'));{const searchInput=root.querySelector('#v35-g-search');let lastQuery=String(searchInput?.value??'');searchInput?.addEventListener('input',e=>{const v=String(e.target.value);if(v===lastQuery)return;lastQuery=v;patchV35Ui('gallery',{query:e.target.value});renderV35Gallery(root)})}root.querySelector('#v35-g-sort')?.addEventListener('change',e=>{patchV35Ui('gallery',{sort:e.target.value});renderV35Gallery(root)});renderV35Gallery(root)}
+    async function cspRenderV35GalleryBase(root){
         const grid=root.querySelector('#v35-g-grid'),count=root.querySelector('#v35-g-count'),ui=getV35UiState().gallery,q=String(ui.query||'').trim().toLowerCase();
         let items=v35GalleryItems();
         if(q)items=items.filter(x=>`${x.title} ${x.messageKey} ${x.chars}`.toLowerCase().includes(q));
@@ -12004,7 +12151,7 @@ ${selected && !ui.mode ? `<div class="pp-preview">${escapeHtml(selected.prompt |
             await Promise.all(buttons.map(loadThumb));
         }
     }
-    function openV35GalleryMenu(anchor,item){
+    function cspOpenV35GalleryMenuBase(anchor,item){
         const oldMenu=cspV35Root?.querySelector('.v35-menu');
         oldMenu?.__v35Cleanup?.();
         oldMenu?.remove();
@@ -12078,7 +12225,7 @@ ${selected && !ui.mode ? `<div class="pp-preview">${escapeHtml(selected.prompt |
     }
     async function openV35StudioFromRecord(messageKey,index=0){if(await cspComicOpenRecord(messageKey,index))return;const rec=normalizeSceneRecordHistory(getSceneRecords()[messageKey],messageKey);if(!rec)return;/* 5.2.8: 고른 기록 칸의 프롬프트를 읽는다(현재 선택 칸이 아니라). */const sel=cspComicClone(rec);sel.currentIndex=index;syncCurrentImageFieldsFromHistory(sel);const resolved=await resolveGeneratedPromptSnapshot(sel,getRoomSettings()),src=await getRecordImageSrc(rec,index),markdown=document.querySelector(`.csp-message-generate-btn[data-message-key="${CSS.escape(messageKey)}"]`)?.closest('[data-message-group-id]')?.querySelector('.wrtn-markdown')||null,bubble=markdown?(getMessageGroupContainer(markdown)||markdown):null;cspV35Session=createV35StudioSession({targetBubble:bubble,markdown,plan:resolved.plan||rec.plan,restored:{...resolved,messageKey,imageSrc:src,naiSettings:{...(resolved.naiSettings||rec.naiSettings||{}),model:rec?.naiSettings?.model||getGlobalSettings().naiModel}}});cspV35Session.messageKey=messageKey;cspV35Session.currentHistoryIndex=index;renderV35Studio();refreshV35Quota();v35Toast('과거 이미지 설정을 스튜디오에 불러왔어.','success')}
     function v35다운로드(src,title='scene-image'){if(!src)return;const a=document.createElement('a');a.href=src;a.download=`${sanitizeFileName(title)}.png`;document.body.appendChild(a);a.click();a.remove()}
-    function openV35Viewer({src,title='장면 이미지',item=null}={}){
+    function cspOpenV35ViewerBase({src,title='장면 이미지',item=null}={}){
         const standalone=!cspV35Root;
         if(standalone){const x=mountV35('gallery');x.app.innerHTML='<div></div>'}
         cspV35Root.classList.add('viewer-active');
