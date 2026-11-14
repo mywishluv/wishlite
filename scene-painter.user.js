@@ -1,13 +1,14 @@
 // ==UserScript==
 // @name         🎨 Crack Scene Painter (크랙 장면 삽화)
 // @namespace    crack-scene-painter
-// @version      5.6.0.5
-// @description  크랙 AI 삽화 + 만화 콘티. 5.6.0.5: 모바일 화면 지원 + 터치 편의 + 갤러리 보관 범위(이 채팅/같은 작품/전체).
+// @version      5.6.0.7
+// @description  크랙 AI 삽화 + 만화 콘티. 5.6.0.7: 모바일 화면 지원 + 터치 편의 + 갤러리 보관 범위(이 채팅/같은 작품/전체).
 // @match        https://crack.wrtn.ai/*
 // @grant        GM_xmlhttpRequest
 // @grant        GM_getValue
 // @grant        GM_setValue
 // @grant        GM_deleteValue
+// @grant        GM_listValues
 // @connect      generativelanguage.googleapis.com
 // @connect      api.deepseek.com
 // @connect      image.novelai.net
@@ -18,6 +19,8 @@
 // @require      https://cdn.jsdelivr.net/npm/fflate@0.8.2/umd/index.js
 // @run-at       document-idle
 // ==/UserScript==
+// 5.6.0.7: 이미지 정보 지우기(저장할 때 자동 + 내 사진 골라서) — 설정 > 저장.
+// 5.6.0.6: 브라우저 저장공간(localStorage)이 가득 차면 탬퍼몽키 저장소로 넘겨 저장(기록 삭제·캐릭터 추가 막힘 수정).
 // 5.6.0.5: 폰 브라우저가 사진 저장소(IndexedDB)를 막으면 탬퍼몽키 저장소에 대신 저장(새로고침하면 사진이 사라지던 문제).
 // 5.6.0.4: 원본과 같이 켜져 있으면 멈추고 안내(기록 덮어쓰기 방지), 갤러리에 저장 상태 한 줄 표시.
 // 5.6.0.3: 파이어폭스에서 저장 목록을 못 읽던 문제 수정(기록 개수 0으로 뜨던 것).
@@ -286,7 +289,7 @@
 
     function getGeminiUsage() {
         try {
-            return normalizeGeminiUsage(JSON.parse(localStorage.getItem(GEMINI_USAGE_STORE_KEY) || '{}'));
+            return normalizeGeminiUsage(JSON.parse(cspStoreGet(GEMINI_USAGE_STORE_KEY) || '{}'));
         } catch (_) {
             return createDefaultGeminiUsage();
         }
@@ -294,14 +297,14 @@
 
     function saveGeminiUsage(usage) {
         try {
-            localStorage.setItem(GEMINI_USAGE_STORE_KEY, JSON.stringify(normalizeGeminiUsage(usage)));
+            cspStoreSet(GEMINI_USAGE_STORE_KEY, JSON.stringify(normalizeGeminiUsage(usage)));
         } catch (err) {
             console.warn('[Crack Scene Painter] Gemini usage save failed:', err);
         }
     }
 
     function resetGeminiUsage() {
-        try { localStorage.removeItem(GEMINI_USAGE_STORE_KEY); } catch (_) {}
+        try { cspStoreRemove(GEMINI_USAGE_STORE_KEY); } catch (_) {}
     }
 
     function getGeminiTokenPrices() {
@@ -1200,11 +1203,11 @@
     }
 
     function getLocalJsonStorage(key, fallback = {}) {
-        return decodeLocalJsonValue(localStorage.getItem(key), fallback, key);
+        return decodeLocalJsonValue(cspStoreGet(key), fallback, key);
     }
 
     function isLocalJsonUnreadable(key) {
-        return cspUndecodableLocalJsonKeys.has(key) && String(localStorage.getItem(key) || '').startsWith(COMPRESSED_JSON_PREFIX);
+        return cspUndecodableLocalJsonKeys.has(key) && String(cspStoreGet(key) || '').startsWith(COMPRESSED_JSON_PREFIX);
     }
 
     function setLocalJsonStorage(key, value) {
@@ -1216,7 +1219,7 @@
         // 못 읽던 값이 지워졌거나 압축되지 않은 값으로 바뀌었으면 지킬 원본이 없으니 잠금을 푼다.
         cspUndecodableLocalJsonKeys.delete(key);
         const encoded = encodeLocalJsonValue(value);
-        localStorage.setItem(key, encoded);
+        cspStoreSet(key, encoded);
         return encoded;
     }
 
@@ -1236,7 +1239,7 @@
         return cspLsKeys()
             .filter(key => !filter || key.includes(filter))
             .map(key => {
-                const value = localStorage.getItem(key) || '';
+                const value = cspStoreGet(key) || '';
                 return {
                     key,
                     kb: getStringSizeKb(key + value),
@@ -1266,7 +1269,7 @@
 
         let changed = 0;
         keys.forEach(key => {
-            const raw = localStorage.getItem(key) || '';
+            const raw = cspStoreGet(key) || '';
             if (!raw || raw.startsWith(COMPRESSED_JSON_PREFIX)) return;
             const parsed = safeJsonParse(raw, null);
             if (!parsed || typeof parsed !== 'object') return;
@@ -3021,7 +3024,7 @@ director.lightingIntent:
                     showToast(`⚠️ 저장공간이 부족해서 이 방 삽화 기록을 최근 ${result.keepCount}개만 보관했어요.`);
                 } else {
                     try {
-                        localStorage.removeItem(getSceneRecordsKey(roomId));
+                        cspStoreRemove(getSceneRecordsKey(roomId));
                     } catch (_) {}
                     cache({});
                     cleanupPrunedSceneRecords(compact, {}, roomId);
@@ -5342,7 +5345,7 @@ director.lightingIntent:
     }
 
     function isEnabled() {
-        return localStorage.getItem(ENABLED_KEY) !== 'off';
+        return cspStoreGet(ENABLED_KEY) !== 'off';
     }
 
     function applySceneVisibilityState(enabled = isEnabled()) {
@@ -5350,7 +5353,7 @@ director.lightingIntent:
     }
 
     function setEnabled(value) {
-        localStorage.setItem(ENABLED_KEY, value ? 'on' : 'off');
+        cspStoreSet(ENABLED_KEY, value ? 'on' : 'off');
     }
 
     function hashText(text) {
@@ -6436,7 +6439,7 @@ director.lightingIntent:
 
     function isCspChatDiagnosticsEnabled() {
         try {
-            return localStorage.getItem(CSP_CHAT_DIAGNOSTICS_KEY) === 'on';
+            return cspStoreGet(CSP_CHAT_DIAGNOSTICS_KEY) === 'on';
         } catch (_) {
             return false;
         }
@@ -10160,7 +10163,7 @@ ${JSON.stringify(safePlan, null, 2)}
             await deleteAllHistoryImages(record, makeStoredImageId(messageKey));
             await deleteRecordPromptArchives(record);
         }
-        localStorage.removeItem(getSceneRecordsKey());
+        cspStoreRemove(getSceneRecordsKey());
         invalidateSceneRecordsCache();
         document.querySelectorAll('.csp-generated-scene-image, .csp-image-history-row').forEach(el => el.remove());
         document.querySelectorAll('.csp-message-generate-btn, .csp-message-speed-btn, .csp-message-comic-btn').forEach(btn => btn.removeAttribute('data-csp-has-image'));
@@ -10619,7 +10622,41 @@ ${JSON.stringify(safePlan, null, 2)}
      * - 원래 기능 코드는 건드리지 않고, 화면 배치·터치 동작만 덧붙인다.
      * ============================================================ */
     // 파이어폭스(탬퍼몽키)에서는 Object.keys(localStorage)가 빈 목록을 줄 수 있어서 하나씩 꺼내 읽는다.
-    function cspLsKeys(){const out=[];try{for(let i=0;i<localStorage.length;i++){const k=localStorage.key(i);if(k!=null)out.push(k)}}catch(_){}return out}
+    function cspLsKeys(){
+        const out=new Set();
+        try{for(let i=0;i<localStorage.length;i++){const k=localStorage.key(i);if(k!=null)out.add(k)}}catch(_){}
+        try{(GM_listValues()||[]).forEach(k=>{if(String(k).startsWith('ls:'))out.add(String(k).slice(3))})}catch(_){}
+        return [...out];
+    }
+
+    /* 5.6.0.6 저장공간 대체: 브라우저 저장공간(localStorage)이 가득 차면 탬퍼몽키 저장소에 대신 넣는다.
+     * 한 키는 항상 한쪽에만 있도록, 한쪽에 쓰면 다른 쪽은 지운다. */
+    var cspLsOverflowCount=0,cspLsOverflowWarned=false;
+    function cspStoreGet(key){
+        let v=null;
+        try{v=localStorage.getItem(key)}catch(_){}
+        if(v!=null)return v;
+        try{const g=GM_getValue('ls:'+key,null);return g==null?null:String(g)}catch(_){return null}
+    }
+    function cspStoreSet(key,value){
+        value=String(value);
+        try{
+            localStorage.setItem(key,value);
+            try{if(GM_getValue('ls:'+key,null)!=null)GM_deleteValue('ls:'+key)}catch(_){}
+            return;
+        }catch(err){
+            const quota=err&&(err.name==='QuotaExceededError'||err.name==='NS_ERROR_DOM_QUOTA_REACHED'||/quota|exceed/i.test(String(err.message||err)));
+            if(!quota)throw err;
+        }
+        GM_setValue('ls:'+key,value);
+        try{localStorage.removeItem(key)}catch(_){}
+        cspLsOverflowCount++;
+        if(!cspLsOverflowWarned){cspLsOverflowWarned=true;try{console.warn('[Scene Painter] 브라우저 저장공간이 가득 차서 탬퍼몽키 저장소에 대신 저장해요:',key)}catch(_){}}
+    }
+    function cspStoreRemove(key){
+        try{localStorage.removeItem(key)}catch(_){}
+        try{GM_deleteValue('ls:'+key)}catch(_){}
+    }
     function cspIsMobileUi(){try{return window.matchMedia(CSP_MOBILE_MQ).matches}catch(_){return false}}
     function cspIsTouchUi(){try{return window.matchMedia('(hover:none) and (pointer:coarse)').matches}catch(_){return false}}
 
@@ -10802,6 +10839,12 @@ ${P} .gallery-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
                 nav.scrollLeft=Math.max(0,nav.scrollLeft+(ar.left-nr.left)-(nav.clientWidth-ar.width)/2);
             }
         }catch(_){}
+        try{
+            if((getV35UiState().settings.page||'connection')==='storage'){
+                const root=cspV35Root;let n=0;
+                const tick=()=>{if(cspV35Root!==root||cspInjectStripSettings(root)||++n>40)return;setTimeout(tick,75)};tick();
+            }
+        }catch(_){}
         return result;
     }
 
@@ -10927,7 +10970,7 @@ ${P} .gallery-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
      * - 메시지 번호가 바뀌어도 글 내용이 같으면 저장된 삽화를 다시 찾아 붙인다.
      * ============================================================ */
     function cspRoomMetaKey(roomId){return `${CSP_PREFIX}_room_meta_${roomId}`}
-    function cspGetRoomMeta(roomId){try{return safeJsonParse(localStorage.getItem(cspRoomMetaKey(roomId)),{})||{}}catch(_){return {}}}
+    function cspGetRoomMeta(roomId){try{return safeJsonParse(cspStoreGet(cspRoomMetaKey(roomId)),{})||{}}catch(_){return {}}}
     function cspCurrentRoomTitle(){
         let t=String(document.title||'').trim();
         t=t.replace(/\s*[|\-–—·:]\s*(크랙|crack|wrtn|뤼튼)[^|]*$/i,'').replace(/^(크랙|crack|wrtn|뤼튼)\s*[|\-–—·:]\s*/i,'').trim();
@@ -10942,7 +10985,7 @@ ${P} .gallery-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
             const next={roomId,storyId:story?.[1]||old.storyId||'',title:cspCurrentRoomTitle()||old.title||'',path:location.pathname+location.search};
             const same=old.storyId===next.storyId&&old.title===next.title&&old.path===next.path;
             if(same&&Date.now()-Number(old.updatedAt||0)<3600000)return;
-            localStorage.setItem(cspRoomMetaKey(roomId),JSON.stringify({...next,updatedAt:Date.now()}));
+            cspStoreSet(cspRoomMetaKey(roomId),JSON.stringify({...next,updatedAt:Date.now()}));
         }catch(_){}
     }
     function saveSceneRecords(records,options={}){
@@ -11067,12 +11110,12 @@ ${P} .gallery-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
             let line=body.querySelector('.g-diag');
             if(!line){line=document.createElement('div');line.className='help g-diag';line.style.cssText='margin:-4px 0 10px;font-size:11px;line-height:1.5;opacity:.8';body.querySelector('.gallery-toolbar')?.after(line)}
             const keys=cspLsKeys(),recKeys=keys.filter(k=>k.startsWith(`${CSP_PREFIX}_scene_records_`));
-            const roomKey=getSceneRecordsKey(getRoomId()),raw=localStorage.getItem(roomKey);
+            const roomKey=getSceneRecordsKey(getRoomId()),raw=cspStoreGet(roomKey);
             let roomCount='없음';
             if(raw){try{roomCount=Object.keys(getLocalJsonStorage(roomKey,{})||{}).length+'개'}catch(_){roomCount='못 읽음'}}
             const memCount=Object.keys(getSceneRecords()||{}).length;
             let idb='확인 중';
-            line.textContent=`저장 상태 · 기록 방 ${recKeys.length}개 · 이 방 저장 ${roomCount} · 이 방 화면 ${memCount}개 · 사진 저장소 ${idb} · 압축도구 ${window.fflate?.gzipSync?'있음':'없음'} · 방 ${String(getRoomId()).slice(-6)}`;
+            line.textContent=`저장 상태 · 기록 방 ${recKeys.length}개 · 이 방 저장 ${roomCount} · 이 방 화면 ${memCount}개 · 사진 저장소 ${idb} · 압축도구 ${window.fflate?.gzipSync?'있음':'없음'} · 브라우저 저장공간 ${cspLsUsageKb()}KB · 대체 저장 ${cspGmLsCount()}개 · 방 ${String(getRoomId()).slice(-6)}`;
             try{
                 const db=await openImageDb();
                 const n=await new Promise((res,rej)=>{const tx=db.transaction(IMAGE_STORE_NAME,'readonly');const rq=tx.objectStore(IMAGE_STORE_NAME).count();rq.onsuccess=()=>res(rq.result);rq.onerror=()=>rej(rq.error)});
@@ -11083,8 +11126,8 @@ ${P} .gallery-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
     }
 
     /* 5.6.0.5 사진 저장소 대체: 파이어폭스 등에서 IndexedDB 저장이 막히면 탬퍼몽키 저장소(GM_setValue)에 넣는다. */
-    let cspIdbBroken=null,cspIdbWarned=false;
-    const cspGmImageKey=id=>`${CSP_PREFIX}_img_${id}`;
+    var cspIdbBroken=null,cspIdbWarned=false;
+    function cspGmImageKey(id){return `${CSP_PREFIX}_img_${id}`}
     function cspNoteIdbFailure(err){
         cspIdbBroken=String(err?.name||err?.message||err||'오류').slice(0,60);
         console.warn('[Scene Painter] IndexedDB 사용 불가, 탬퍼몽키 저장소로 대신 저장:',err);
@@ -11107,6 +11150,111 @@ ${P} .gallery-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
         if(!id)return;
         try{GM_deleteValue(cspGmImageKey(id))}catch(_){}
         try{return await cspDeleteStoredImageIdb(id)}catch(err){cspNoteIdbFailure(err)}
+    }
+
+    function cspLsUsageKb(){let n=0;try{for(let i=0;i<localStorage.length;i++){const k=localStorage.key(i)||'';n+=k.length+(localStorage.getItem(k)||'').length}}catch(_){}return Math.round(n*2/1024)}
+    function cspGmLsCount(){try{return (GM_listValues()||[]).filter(k=>String(k).startsWith('ls:')).length}catch(_){return 0}}
+
+    /* ============================================================
+     * 5.6.0.7 이미지 정보 지우기
+     * EXIF·위치·AI 프롬프트(PNG 글 정보)·NovelAI 스텔스 정보(투명도 숨김 비트)를 지운다.
+     * - JPEG: 다시 압축하지 않고 정보 구간만 잘라낸다(화질 그대로).
+     * - 투명도 없는 PNG: 그림 데이터는 그대로 두고 정보 구간만 잘라낸다.
+     * - 투명도 있는 PNG·기타: 거의 불투명한 픽셀을 완전 불투명으로 맞춰 숨은 비트를 없애고 PNG(무손실)로 다시 저장한다.
+     * ============================================================ */
+    function cspStripOn(){try{return GM_getValue('csp_mobile_strip_meta',true)!==false}catch(_){return true}}
+    async function cspSrcToBytes(src){
+        const s=String(src||'');
+        if(s.startsWith('data:')){const i=s.indexOf(',');const head=s.slice(5,i);const body=s.slice(i+1);return {bytes:/;base64/i.test(head)?base64ToBytes(body):new TextEncoder().encode(decodeURIComponent(body)),type:head.split(';')[0]||''}}
+        const r=await fetch(s);const b=await r.blob();return {bytes:new Uint8Array(await b.arrayBuffer()),type:b.type||''};
+    }
+    const CSP_PNG_KEEP=new Set(['IHDR','PLTE','IDAT','IEND','tRNS','gAMA','cHRM','sRGB','iCCP','sBIT','pHYs']);
+    function cspIsPng(b){return b.length>8&&b[0]===0x89&&b[1]===0x50&&b[2]===0x4E&&b[3]===0x47}
+    function cspIsJpeg(b){return b.length>3&&b[0]===0xFF&&b[1]===0xD8}
+    function cspCleanPngChunks(b){
+        const out=[b.subarray(0,8)];let p=8,removed=0;
+        while(p+8<=b.length){
+            const len=((b[p]<<24)>>>0)+(b[p+1]<<16)+(b[p+2]<<8)+b[p+3];
+            const type=String.fromCharCode(b[p+4],b[p+5],b[p+6],b[p+7]);
+            const end=p+12+len;if(end>b.length)break;
+            if(CSP_PNG_KEEP.has(type))out.push(b.subarray(p,end));else removed++;
+            p=end;if(type==='IEND')break;
+        }
+        return {blob:new Blob(out,{type:'image/png'}),removed};
+    }
+    function cspCleanJpeg(b){
+        const out=[b.subarray(0,2)];let p=2,removed=0;
+        while(p+4<=b.length){
+            if(b[p]!==0xFF){out.push(b.subarray(p));break}
+            const m=b[p+1];
+            if(m===0xD8||m===0x01||(m>=0xD0&&m<=0xD7)){out.push(b.subarray(p,p+2));p+=2;continue}
+            if(m===0xDA||m===0xD9){out.push(b.subarray(p));break}
+            const len=(b[p+2]<<8)+b[p+3],end=p+2+len;if(end>b.length){out.push(b.subarray(p));break}
+            const drop=(m>=0xE1&&m<=0xEF&&m!==0xE2&&m!==0xEE)||m===0xFE;
+            if(drop)removed++;else out.push(b.subarray(p,end));
+            p=end;
+        }
+        return {blob:new Blob(out,{type:'image/jpeg'}),removed};
+    }
+    function cspLoadImg(blob){return new Promise((res,rej)=>{const u=URL.createObjectURL(blob),im=new Image();im.onload=()=>{res(im);setTimeout(()=>URL.revokeObjectURL(u),1000)};im.onerror=()=>{URL.revokeObjectURL(u);rej(new Error('이미지를 열지 못했어요.'))};im.src=u})}
+    async function cspCanvasClean(blob){
+        const im=await cspLoadImg(blob),c=document.createElement('canvas');
+        c.width=im.naturalWidth;c.height=im.naturalHeight;
+        const ctx=c.getContext('2d',{willReadFrequently:true});ctx.drawImage(im,0,0);
+        const d=ctx.getImageData(0,0,c.width,c.height),a=d.data;let fixed=0;
+        for(let i=3;i<a.length;i+=4){if(a[i]>=250&&a[i]!==255){a[i]=255;fixed++}}
+        ctx.putImageData(d,0,0);
+        const out=await new Promise((res,rej)=>c.toBlob(x=>x?res(x):rej(new Error('PNG로 저장하지 못했어요.')),'image/png'));
+        return {blob:out,fixed};
+    }
+    async function cspStripImageMeta(src){
+        const {bytes,type}=src instanceof Blob?{bytes:new Uint8Array(await src.arrayBuffer()),type:src.type}:await cspSrcToBytes(src);
+        if(cspIsJpeg(bytes)){const r=cspCleanJpeg(bytes);return {blob:r.blob,ext:'jpg'}}
+        if(cspIsPng(bytes)){
+            const colorType=bytes[25];
+            if(colorType!==4&&colorType!==6)return {blob:cspCleanPngChunks(bytes).blob,ext:'png'};
+        }
+        const r=await cspCanvasClean(new Blob([bytes],{type:type||'image/png'}));
+        return {blob:r.blob,ext:'png'};
+    }
+    function cspDownloadBlob(blob,name){
+        const u=URL.createObjectURL(blob),a=document.createElement('a');
+        a.href=u;a.download=name;document.body.appendChild(a);a.click();a.remove();
+        setTimeout(()=>URL.revokeObjectURL(u),60000);
+    }
+    function v35다운로드(src,title='scene-image'){
+        if(!src)return;
+        if(!cspStripOn())return cspV35DownloadBase(src,title);
+        cspStripImageMeta(src)
+            .then(({blob,ext})=>cspDownloadBlob(blob,`${sanitizeFileName(title)}.${ext}`))
+            .catch(err=>{console.warn('[Scene Painter] 정보 지우기 실패, 원본으로 저장:',err);cspV35DownloadBase(src,title)});
+    }
+    // 내 폰의 사진을 골라 정보를 지우고 저장
+    function cspPickAndStrip(){
+        const inp=document.createElement('input');inp.type='file';inp.accept='image/*';inp.multiple=true;inp.style.display='none';
+        inp.onchange=async()=>{
+            const files=[...(inp.files||[])];inp.remove();let ok=0;
+            for(const f of files){
+                try{const {blob,ext}=await cspStripImageMeta(f);const base=String(f.name||'image').replace(/\.[^.]+$/,'');cspDownloadBlob(blob,`${sanitizeFileName(base)}_clean.${ext}`);ok++}
+                catch(err){console.warn('[Scene Painter] 사진 정보 지우기 실패:',f.name,err)}
+            }
+            try{v35Toast(ok?`🧹 ${ok}장의 정보를 지워서 저장했어요.`:'정보를 지우지 못했어요.',ok?'ok':'error')}catch(_){showToast(ok?`🧹 ${ok}장 저장했어요.`:'실패했어요.')}
+        };
+        document.body.appendChild(inp);inp.click();
+    }
+    function cspInjectStripSettings(root){
+        const page=root?.querySelector('#v35-settings-page');if(!page||page.querySelector('#csp-strip-blk'))return false;
+        if(!page.children.length)return false;
+        const sec=document.createElement('section');sec.className='blk';sec.id='csp-strip-blk';
+        const on=cspStripOn();
+        sec.innerHTML=`<div class="blk-title">🧹 이미지 정보 지우기</div>
+<div class="setting-row"><div class="setting-label"><b>저장할 때 정보 지우기</b><span class="help">다운로드하는 삽화에서 AI 프롬프트·NovelAI 숨은 정보를 지워요</span></div><select class="select" id="csp-strip-on"><option value="1" ${on?'selected':''}>켜기</option><option value="0" ${!on?'selected':''}>끄기</option></select></div>
+<div class="setting-row"><div class="setting-label"><b>내 사진 정보 지우기</b><span class="help">EXIF·위치·AI 프롬프트·NovelAI 스텔스 정보를 화질 손실 없이 지워요</span></div><button class="btn" id="csp-strip-pick" type="button">📷 사진 고르기</button></div>
+<p class="help">사진은 폰 안에서만 처리하고 다른 곳으로 보내지 않아요.</p>`;
+        page.insertBefore(sec,page.firstChild);
+        sec.querySelector('#csp-strip-on').addEventListener('change',e=>{try{GM_setValue('csp_mobile_strip_meta',e.target.value==='1')}catch(_){}});
+        sec.querySelector('#csp-strip-pick').addEventListener('click',cspPickAndStrip);
+        return true;
     }
 
     function ensureV35Styles() {
@@ -12294,7 +12442,7 @@ ${selected && !ui.mode ? `<div class="pp-preview">${escapeHtml(selected.prompt |
         },0);
     }
     async function openV35StudioFromRecord(messageKey,index=0){if(await cspComicOpenRecord(messageKey,index))return;const rec=normalizeSceneRecordHistory(getSceneRecords()[messageKey],messageKey);if(!rec)return;/* 5.2.8: 고른 기록 칸의 프롬프트를 읽는다(현재 선택 칸이 아니라). */const sel=cspComicClone(rec);sel.currentIndex=index;syncCurrentImageFieldsFromHistory(sel);const resolved=await resolveGeneratedPromptSnapshot(sel,getRoomSettings()),src=await getRecordImageSrc(rec,index),markdown=document.querySelector(`.csp-message-generate-btn[data-message-key="${CSS.escape(messageKey)}"]`)?.closest('[data-message-group-id]')?.querySelector('.wrtn-markdown')||null,bubble=markdown?(getMessageGroupContainer(markdown)||markdown):null;cspV35Session=createV35StudioSession({targetBubble:bubble,markdown,plan:resolved.plan||rec.plan,restored:{...resolved,messageKey,imageSrc:src,naiSettings:{...(resolved.naiSettings||rec.naiSettings||{}),model:rec?.naiSettings?.model||getGlobalSettings().naiModel}}});cspV35Session.messageKey=messageKey;cspV35Session.currentHistoryIndex=index;renderV35Studio();refreshV35Quota();v35Toast('과거 이미지 설정을 스튜디오에 불러왔어.','success')}
-    function v35다운로드(src,title='scene-image'){if(!src)return;const a=document.createElement('a');a.href=src;a.download=`${sanitizeFileName(title)}.png`;document.body.appendChild(a);a.click();a.remove()}
+    function cspV35DownloadBase(src,title='scene-image'){if(!src)return;const a=document.createElement('a');a.href=src;a.download=`${sanitizeFileName(title)}.png`;document.body.appendChild(a);a.click();a.remove()}
     function cspOpenV35ViewerBase({src,title='장면 이미지',item=null}={}){
         const standalone=!cspV35Root;
         if(standalone){const x=mountV35('gallery');x.app.innerHTML='<div></div>'}
