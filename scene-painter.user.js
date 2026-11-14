@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         🎨 Crack Scene Painter (크랙 장면 삽화)
 // @namespace    crack-scene-painter
-// @version      5.6.0.7
-// @description  크랙 AI 삽화 + 만화 콘티. 5.6.0.7: 모바일 화면 지원 + 터치 편의 + 갤러리 보관 범위(이 채팅/같은 작품/전체).
+// @version      5.6.0.8
+// @description  크랙 AI 삽화 + 만화 콘티. 5.6.0.8: 모바일 화면 지원 + 터치 편의 + 갤러리 보관 범위(이 채팅/같은 작품/전체).
 // @match        https://crack.wrtn.ai/*
 // @grant        GM_xmlhttpRequest
 // @grant        GM_getValue
@@ -19,6 +19,7 @@
 // @require      https://cdn.jsdelivr.net/npm/fflate@0.8.2/umd/index.js
 // @run-at       document-idle
 // ==/UserScript==
+// 5.6.0.8: 모바일에서 진행 카드를 화면 맨 위로, 스튜디오 생성 버튼이 화면 밖으로 밀리던 것 수정.
 // 5.6.0.7: 이미지 정보 지우기(저장할 때 자동 + 내 사진 골라서) — 설정 > 저장.
 // 5.6.0.6: 브라우저 저장공간(localStorage)이 가득 차면 탬퍼몽키 저장소로 넘겨 저장(기록 삭제·캐릭터 추가 막힘 수정).
 // 5.6.0.5: 폰 브라우저가 사진 저장소(IndexedDB)를 막으면 탬퍼몽키 저장소에 대신 저장(새로고침하면 사진이 사라지던 문제).
@@ -10709,6 +10710,9 @@ ${P} .viewer-main{touch-action:none}
 }
 
 @media ${CSP_MOBILE_MQ}{
+/* 장면 분석·생성 진행 카드: 채팅을 가리지 않게 화면 맨 위로 */
+.csp-task-hud-backdrop{top:calc(8px + env(safe-area-inset-top))!important;bottom:auto!important;width:calc(100vw - 16px)!important}
+.csp-task-hud{padding:10px 12px 10px!important;border-radius:14px!important}
 ${P}{display:block;padding:0}
 ${P} .v35-app,${P} .v35-app.settings,${P} .v35-app.gallery{width:100vw!important;height:100vh!important;height:100dvh!important;min-width:0!important;min-height:0!important;max-width:none!important;max-height:none!important;border:0;border-radius:0;box-shadow:none}
 
@@ -10761,6 +10765,9 @@ ${P} .bottom .m-sub .nai-usage{height:36px}
 ${P} .bottom .m-pri{display:flex;gap:8px}
 ${P} .bottom .m-pri .btn{height:48px!important;min-height:48px;flex:1 1 0;font-size:14px;border-radius:12px;padding:0 10px!important}
 ${P} .bottom .m-pri #v35-generate{flex:1.6 1 0}
+${P} .bottom .m-pri .btn{min-width:0;overflow:hidden;flex-direction:column;justify-content:center;gap:1px;line-height:1.15;white-space:nowrap}
+${P} .bottom .m-pri .bstack{min-width:0;max-width:100%;align-items:center}
+${P} .bottom .m-pri .bsub{display:block;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:10.5px;margin:0}
 
 /* 설정: 왼쪽 메뉴 → 위쪽 탭 */
 ${P} .settings-body{display:flex;flex-direction:column}
